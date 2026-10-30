@@ -30,6 +30,7 @@ uda.taskwarrior-tui.task-report.jump-to-task-on-modify=true
 uda.taskwarrior-tui.task-report.prompt-on-undo=false
 uda.taskwarrior-tui.task-report.prompt-on-delete=false
 uda.taskwarrior-tui.task-report.prompt-on-done=false
+uda.taskwarrior-tui.task-report.details-summary=false
 uda.taskwarrior-tui.style.report.selection=
 uda.taskwarrior-tui.style.context.active=black on rgb444
 uda.taskwarrior-tui.style.report-menu.active=black on rgb444
@@ -54,7 +55,18 @@ uda.taskwarrior-tui.style.title=         # default: LightCyan foreground
 uda.taskwarrior-tui.style.title.border=  # default: White foreground
 uda.taskwarrior-tui.style.help.gauge=    # default: Gray foreground
 uda.taskwarrior-tui.style.command.error= # default: Red foreground
+# Task details summary styles (used when task-report.details-summary=true)
+uda.taskwarrior-tui.style.details.description=bold
+uda.taskwarrior-tui.style.details.status.pending=green
+uda.taskwarrior-tui.style.details.status.waiting=yellow
+uda.taskwarrior-tui.style.details.status.completed=bright black
+uda.taskwarrior-tui.style.details.status.deleted=red
+uda.taskwarrior-tui.style.details.status.recurring=magenta
+uda.taskwarrior-tui.style.details.annotation-date=blue
+uda.taskwarrior-tui.style.details.annotation-separator=bright black
 ```
+
+When `uda.taskwarrior-tui.task-report.details-summary=true`, the task details pane starts with a summary of the `Description`, `ID`, `Status` and `Due` fields, then lists the annotations with a separator line between them, then shows the rest of the `task info` output without those rows. The `Due` value uses the Taskwarrior colors `color.overdue`, `color.due.today` and `color.due`, the same as the task report.
 
 See [color configuration](./colors.md) for supported color formats and additional TUI style keys such as `uda.taskwarrior-tui.style.navbar` and `uda.taskwarrior-tui.style.command`.
 

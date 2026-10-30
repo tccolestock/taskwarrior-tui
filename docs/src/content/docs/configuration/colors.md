@@ -39,6 +39,14 @@ uda.taskwarrior-tui.style.navbar
 uda.taskwarrior-tui.style.command
 uda.taskwarrior-tui.style.report.scrollbar
 uda.taskwarrior-tui.style.report.scrollbar.area
+uda.taskwarrior-tui.style.details.description
+uda.taskwarrior-tui.style.details.status.pending
+uda.taskwarrior-tui.style.details.status.waiting
+uda.taskwarrior-tui.style.details.status.completed
+uda.taskwarrior-tui.style.details.status.deleted
+uda.taskwarrior-tui.style.details.status.recurring
+uda.taskwarrior-tui.style.details.annotation-date
+uda.taskwarrior-tui.style.details.annotation-separator
 ```
 
 ## Color Formats

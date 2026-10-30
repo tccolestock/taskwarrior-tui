@@ -99,6 +99,7 @@ pub struct Config {
   pub uda_task_report_use_all_tasks_for_completion: bool,
   pub uda_task_report_use_alternate_style: bool,
   pub uda_task_report_info_show: bool,
+  pub uda_task_report_details_summary: bool,
   pub uda_task_report_looping: bool,
   pub uda_task_report_jump_to_task_on_add: bool,
   pub uda_task_report_jump_to_task_on_modify: bool,
@@ -130,6 +131,14 @@ pub struct Config {
   pub uda_style_title_border: Style,
   pub uda_style_help_gauge: Style,
   pub uda_style_command_error: Style,
+  pub uda_style_details_description: Style,
+  pub uda_style_details_status_pending: Style,
+  pub uda_style_details_status_waiting: Style,
+  pub uda_style_details_status_completed: Style,
+  pub uda_style_details_status_deleted: Style,
+  pub uda_style_details_status_recurring: Style,
+  pub uda_style_details_annotation_date: Style,
+  pub uda_style_details_annotation_separator: Style,
   pub uda_shortcuts: Vec<String>,
   pub uda_change_focus_rotate: bool,
   pub uda_background_process: String,
@@ -182,6 +191,7 @@ impl Config {
     let uda_task_report_use_all_tasks_for_completion = Self::get_uda_task_report_use_all_tasks_for_completion(data);
     let uda_task_report_use_alternate_style = Self::get_uda_task_report_use_alternate_style(data);
     let uda_task_report_info_show = Self::get_uda_task_report_info_show(data);
+    let uda_task_report_details_summary = Self::get_uda_task_report_details_summary(data);
     let uda_task_report_looping = Self::get_uda_task_report_looping(data);
     let uda_task_report_jump_to_task_on_add = Self::get_uda_task_report_jump_to_task_on_add(data);
     let uda_task_report_jump_to_task_on_modify = Self::get_uda_task_report_jump_to_task_on_modify(data);
@@ -232,6 +242,16 @@ impl Config {
     let uda_style_title_border = uda_style_title_border.unwrap_or_else(|| Style::default().fg(Color::White));
     let uda_style_help_gauge = uda_style_help_gauge.unwrap_or_else(|| Style::default().fg(Color::Gray));
     let uda_style_command_error = uda_style_command_error.unwrap_or_else(|| Style::default().fg(Color::Red));
+    let uda_style_details_description = Self::get_uda_style("details.description", data).unwrap_or_else(|| Self::get_tcolor("bold"));
+    let uda_style_details_status_pending = Self::get_uda_style("details.status.pending", data).unwrap_or_else(|| Self::get_tcolor("green"));
+    let uda_style_details_status_waiting = Self::get_uda_style("details.status.waiting", data).unwrap_or_else(|| Self::get_tcolor("yellow"));
+    let uda_style_details_status_completed =
+      Self::get_uda_style("details.status.completed", data).unwrap_or_else(|| Self::get_tcolor("bright black"));
+    let uda_style_details_status_deleted = Self::get_uda_style("details.status.deleted", data).unwrap_or_else(|| Self::get_tcolor("red"));
+    let uda_style_details_status_recurring = Self::get_uda_style("details.status.recurring", data).unwrap_or_else(|| Self::get_tcolor("magenta"));
+    let uda_style_details_annotation_date = Self::get_uda_style("details.annotation-date", data).unwrap_or_else(|| Self::get_tcolor("blue"));
+    let uda_style_details_annotation_separator =
+      Self::get_uda_style("details.annotation-separator", data).unwrap_or_else(|| Self::get_tcolor("bright black"));
     let uda_quick_tag_name = Self::get_uda_quick_tag_name(data);
     let uda_task_report_info_location = Self::get_uda_task_report_info_location(data);
     let uda_task_report_prompt_on_undo = Self::get_uda_task_report_prompt_on_undo(data);
@@ -266,6 +286,7 @@ impl Config {
       uda_task_report_use_all_tasks_for_completion,
       uda_task_report_use_alternate_style,
       uda_task_report_info_show,
+      uda_task_report_details_summary,
       uda_task_report_looping,
       uda_task_report_jump_to_task_on_add,
       uda_task_report_jump_to_task_on_modify,
@@ -297,6 +318,14 @@ impl Config {
       uda_style_title_border,
       uda_style_help_gauge,
       uda_style_command_error,
+      uda_style_details_description,
+      uda_style_details_status_pending,
+      uda_style_details_status_waiting,
+      uda_style_details_status_completed,
+      uda_style_details_status_deleted,
+      uda_style_details_status_recurring,
+      uda_style_details_annotation_date,
+      uda_style_details_annotation_separator,
       uda_shortcuts,
       uda_background_process,
       uda_background_process_period,
@@ -692,6 +721,13 @@ impl Config {
       .unwrap_or_default()
       .get_bool()
       .unwrap_or(true)
+  }
+
+  fn get_uda_task_report_details_summary(data: &str) -> bool {
+    Self::get_config("uda.taskwarrior-tui.task-report.details-summary", data)
+      .unwrap_or_default()
+      .get_bool()
+      .unwrap_or(false)
   }
 
   fn get_uda_task_report_jump_to_task_on_add(data: &str) -> bool {
@@ -1333,6 +1369,69 @@ mod tests {
   fn test_get_uda_task_report_info_show_supports_legacy_show_info_key() {
     let data = "uda.taskwarrior-tui.task-report.show-info false";
     assert!(!Config::get_uda_task_report_info_show(data));
+  }
+
+  #[test]
+  fn test_get_uda_task_report_details_summary_defaults_to_false() {
+    assert!(!Config::get_uda_task_report_details_summary(""));
+  }
+
+  #[test]
+  fn test_get_uda_task_report_details_summary_can_be_enabled() {
+    let data = "uda.taskwarrior-tui.task-report.details-summary true";
+    assert!(Config::get_uda_task_report_details_summary(data));
+  }
+
+  fn minimal_config_data(extra: &[&str]) -> String {
+    let mut lines = vec![
+      "data.location /tmp/taskwarrior-tui-tests",
+      "rule.precedence.color keyword.,tag.,project.",
+      "uda.priority.values H,M,L,",
+      "report.next.filter status:pending",
+    ];
+    lines.extend_from_slice(extra);
+    lines.join("\n")
+  }
+
+  #[test]
+  fn test_details_styles_default_to_palette_colors() {
+    let config = Config::new(&minimal_config_data(&[]), "next").unwrap();
+
+    assert!(!config.uda_task_report_details_summary);
+    assert_eq!(config.uda_style_details_description, Style::default().add_modifier(Modifier::BOLD));
+    assert_eq!(config.uda_style_details_status_pending, Style::default().fg(Color::Indexed(2)));
+    assert_eq!(config.uda_style_details_status_waiting, Style::default().fg(Color::Indexed(3)));
+    assert_eq!(config.uda_style_details_status_completed, Style::default().fg(Color::Indexed(8)));
+    assert_eq!(config.uda_style_details_status_deleted, Style::default().fg(Color::Indexed(1)));
+    assert_eq!(config.uda_style_details_status_recurring, Style::default().fg(Color::Indexed(5)));
+    assert_eq!(config.uda_style_details_annotation_date, Style::default().fg(Color::Indexed(4)));
+    assert_eq!(config.uda_style_details_annotation_separator, Style::default().fg(Color::Indexed(8)));
+  }
+
+  #[test]
+  fn test_details_styles_can_be_configured() {
+    let data = minimal_config_data(&[
+      "uda.taskwarrior-tui.task-report.details-summary yes",
+      "uda.taskwarrior-tui.style.details.description underline cyan",
+      "uda.taskwarrior-tui.style.details.status.pending bold green",
+      "uda.taskwarrior-tui.style.details.status.waiting white",
+      "uda.taskwarrior-tui.style.details.status.completed color8",
+      "uda.taskwarrior-tui.style.details.status.deleted bright red",
+      "uda.taskwarrior-tui.style.details.status.recurring cyan",
+      "uda.taskwarrior-tui.style.details.annotation-date yellow",
+      "uda.taskwarrior-tui.style.details.annotation-separator gray5",
+    ]);
+    let config = Config::new(&data, "next").unwrap();
+
+    assert!(config.uda_task_report_details_summary);
+    assert_eq!(config.uda_style_details_description, Config::get_tcolor("underline cyan"));
+    assert_eq!(config.uda_style_details_status_pending, Config::get_tcolor("bold green"));
+    assert_eq!(config.uda_style_details_status_waiting, Config::get_tcolor("white"));
+    assert_eq!(config.uda_style_details_status_completed, Config::get_tcolor("color8"));
+    assert_eq!(config.uda_style_details_status_deleted, Config::get_tcolor("bright red"));
+    assert_eq!(config.uda_style_details_status_recurring, Config::get_tcolor("cyan"));
+    assert_eq!(config.uda_style_details_annotation_date, Config::get_tcolor("yellow"));
+    assert_eq!(config.uda_style_details_annotation_separator, Config::get_tcolor("gray5"));
   }
 
   #[test]

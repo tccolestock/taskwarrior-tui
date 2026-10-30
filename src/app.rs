@@ -127,6 +127,164 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
     .split(popup_layout[1])[1]
 }
 
+/// Rows of the first `task info` table that the details summary shows instead.
+const TASK_DETAILS_SUMMARY_ROWS: [&str; 4] = ["ID", "Description", "Status", "Due"];
+
+fn is_task_info_row(line: &str, label: &str) -> bool {
+  line
+    .strip_prefix(label)
+    .is_some_and(|rest| rest.is_empty() || rest.starts_with(char::is_whitespace))
+}
+
+/// Removes the summary rows from the first table of `task info` output.
+/// A removed row takes its continuation lines (indented lines up to the next
+/// row or blank line) with it. Later tables are returned unchanged.
+fn filter_task_info_text(data: &str) -> Vec<&str> {
+  let mut lines = Vec::new();
+  let mut table_started = false;
+  let mut table_ended = false;
+  let mut skipping_row = false;
+  for line in data.lines() {
+    if table_ended {
+      lines.push(line);
+    } else if line.trim().is_empty() {
+      table_ended = table_started;
+      skipping_row = false;
+      lines.push(line);
+    } else if line.starts_with(char::is_whitespace) {
+      table_started = true;
+      if !skipping_row {
+        lines.push(line);
+      }
+    } else {
+      table_started = true;
+      skipping_row = TASK_DETAILS_SUMMARY_ROWS.iter().any(|label| is_task_info_row(line, label));
+      if !skipping_row {
+        lines.push(line);
+      }
+    }
+  }
+  lines
+}
+
+/// Word-wraps `text` to `width` display columns. Words wider than `width` are split.
+fn wrap_text(text: &str, width: usize) -> Vec<String> {
+  let width = width.max(1);
+  let mut lines = Vec::new();
+  for paragraph in text.split('\n') {
+    let mut current = String::new();
+    let mut current_width = 0;
+    for word in paragraph.split_whitespace() {
+      let word_width = word.width();
+      if current_width > 0 && current_width + 1 + word_width <= width {
+        current.push(' ');
+        current.push_str(word);
+        current_width += 1 + word_width;
+        continue;
+      }
+      if current_width > 0 {
+        lines.push(std::mem::take(&mut current));
+        current_width = 0;
+      }
+      for grapheme in word.graphemes(true) {
+        let grapheme_width = grapheme.width();
+        if current_width > 0 && current_width + grapheme_width > width {
+          lines.push(std::mem::take(&mut current));
+          current_width = 0;
+        }
+        current.push_str(grapheme);
+        current_width += grapheme_width;
+      }
+    }
+    lines.push(current);
+  }
+  lines
+}
+
+/// Wraps `text` into the space right of `prefix`, indenting wrapped lines to align under the text start.
+fn wrap_with_hanging_indent(prefix: Vec<Span<'static>>, prefix_width: usize, text: &str, style: Style, width: usize) -> Vec<Line<'static>> {
+  let indent = " ".repeat(prefix_width);
+  wrap_text(text, width.saturating_sub(prefix_width))
+    .into_iter()
+    .enumerate()
+    .map(|(i, chunk)| {
+      let mut spans = if i == 0 { prefix.clone() } else { vec![Span::raw(indent.clone())] };
+      spans.push(Span::styled(chunk, style));
+      Line::from(spans)
+    })
+    .collect()
+}
+
+fn task_details_status_style(status: &TaskStatus, config: &Config) -> Style {
+  match status {
+    TaskStatus::Pending => config.uda_style_details_status_pending,
+    TaskStatus::Waiting => config.uda_style_details_status_waiting,
+    TaskStatus::Completed => config.uda_style_details_status_completed,
+    TaskStatus::Deleted => config.uda_style_details_status_deleted,
+    TaskStatus::Recurring => config.uda_style_details_status_recurring,
+  }
+}
+
+fn task_details_due_style(task: &Task, config: &Config) -> Style {
+  let has_tag = |tag: &str| task.tags().is_some_and(|tags| tags.iter().any(|t| t == tag));
+  let key = if has_tag("OVERDUE") {
+    "color.overdue"
+  } else if has_tag("DUETODAY") {
+    "color.due.today"
+  } else if has_tag("DUE") {
+    "color.due"
+  } else {
+    return Style::default();
+  };
+  config.color.get(key).copied().unwrap_or_default()
+}
+
+/// Builds the summary and annotation lines shown above the `task info` text,
+/// wrapped to `width` columns.
+fn task_details_summary_lines(task: &Task, config: &Config, width: usize) -> Vec<Line<'static>> {
+  let id = match task.id() {
+    Some(id) if id > 0 => id.to_string(),
+    _ => "-".to_string(),
+  };
+  let mut rows = vec![
+    ("Description", task.description().clone(), config.uda_style_details_description),
+    ("ID", id, Style::default()),
+    ("Status", task.status().to_string(), task_details_status_style(task.status(), config)),
+  ];
+  if let Some(due) = task.due() {
+    rows.push(("Due", datetime::format_local_date_time(due), task_details_due_style(task, config)));
+  }
+
+  // Align values with the `task info` table below ("Last modified" plus one space).
+  let label_width = 14;
+  let mut lines = Vec::new();
+  for (label, value, style) in rows {
+    let prefix = vec![Span::raw(format!("{label:<label_width$}"))];
+    lines.extend(wrap_with_hanging_indent(prefix, label_width, &value, style, width));
+  }
+
+  if let Some(annotations) = task.annotations().filter(|annotations| !annotations.is_empty()) {
+    lines.push(Line::default());
+    lines.push(Line::from(Span::styled("Annotations", Style::default().add_modifier(Modifier::BOLD))));
+    for (i, annotation) in annotations.iter().enumerate() {
+      if i > 0 {
+        lines.push(Line::from(Span::styled("─".repeat(width), config.uda_style_details_annotation_separator)));
+      }
+      let date = datetime::format_local_date_time(annotation.entry());
+      let prefix_width = date.width() + 1;
+      let prefix = vec![Span::styled(date, config.uda_style_details_annotation_date), Span::raw(" ")];
+      lines.extend(wrap_with_hanging_indent(
+        prefix,
+        prefix_width,
+        annotation.description(),
+        Style::default(),
+        width,
+      ));
+    }
+  }
+  lines
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Mode {
   Tasks(Action),
@@ -1424,11 +1582,19 @@ impl TaskwarriorTui {
       Some(s) => s.clone(),
       None => "Loading task details ...".to_string(),
     };
+    let (text, line_count) = if self.config.uda_task_report_details_summary {
+      let mut lines = task_details_summary_lines(&self.tasks[selected], &self.config, rect.width as usize);
+      lines.extend(filter_task_info_text(&data).into_iter().map(|line| Line::from(line.to_string())));
+      let line_count = lines.len();
+      (Text::from(lines), line_count)
+    } else {
+      (Text::from(&data[..]), data.lines().count())
+    };
     self.task_details_scroll = std::cmp::min(
-      (data.lines().count() as u16).saturating_sub(rect.height).saturating_add(2),
+      (line_count as u16).saturating_sub(rect.height).saturating_add(2),
       self.task_details_scroll,
     );
-    let p = Paragraph::new(Text::from(&data[..]))
+    let p = Paragraph::new(text)
       .block(Block::default().borders(Borders::TOP))
       .scroll((self.task_details_scroll, 0));
     f.render_widget(p, rect);
@@ -4582,6 +4748,181 @@ mod tests {
   #[test]
   fn test_centered_rect() {
     assert_eq!(centered_rect(50, 50, Rect::new(0, 0, 100, 100)), Rect::new(25, 25, 50, 50));
+  }
+
+  const TASK_INFO_SAMPLE: &str = "
+Name          Value
+------------- ------------------------------------------------
+ID            12
+Description   Document and-or create a install script for
+              setting up a new robot box
+                2026-10-22 17:26:20 Python 3.11 has special requirements.
+                2026-10-29 21:58:38 PR #460 bot review addressed and
+              pushed as f70380d8
+Status        Pending
+Project       Robots
+Due           2026-11-01 08:00:00
+Entered       2026-10-22 17:26:03 (8d)
+Last modified 2026-10-30 00:18:10 (18h)
+Virtual tags  ANNOTATED PENDING PROJECT READY UDA UNBLOCKED
+UUID          4f08d42c-7af5-4649-89a3-7475797d3078
+
+--------------- ------ - ---- - ------
+    project          1 *    1 =      1
+
+Date                Modification
+------------------- -----------------------------------------------
+2026-10-22 17:26:03 Description set to 'x'.
+ID            kept in later tables
+Status        kept in later tables
+";
+
+  fn details_test_config(extra: &[&str]) -> Config {
+    let mut lines = vec![
+      "data.location /tmp/taskwarrior-tui-tests",
+      "rule.precedence.color keyword.,tag.,project.",
+      "uda.priority.values H,M,L,",
+      "report.next.filter status:pending",
+    ];
+    lines.extend_from_slice(extra);
+    Config::new(&lines.join("\n"), "next").unwrap()
+  }
+
+  fn details_test_task(json: &str) -> Task {
+    task_hookrs::import::import(format!("[{json}]").as_bytes()).unwrap().remove(0)
+  }
+
+  fn line_text(line: &Line) -> String {
+    line.spans.iter().map(|span| span.content.as_ref()).collect()
+  }
+
+  #[test]
+  fn test_filter_task_info_text_removes_summary_rows_and_continuations() {
+    let filtered = filter_task_info_text(TASK_INFO_SAMPLE);
+    let expected_first_table = vec![
+      "",
+      "Name          Value",
+      "------------- ------------------------------------------------",
+      "Project       Robots",
+      "Entered       2026-10-22 17:26:03 (8d)",
+      "Last modified 2026-10-30 00:18:10 (18h)",
+      "Virtual tags  ANNOTATED PENDING PROJECT READY UDA UNBLOCKED",
+      "UUID          4f08d42c-7af5-4649-89a3-7475797d3078",
+      "",
+    ];
+    assert_eq!(filtered[..expected_first_table.len()], expected_first_table[..]);
+
+    let later_tables: Vec<&str> = TASK_INFO_SAMPLE.lines().skip_while(|line| !line.starts_with("---------------")).collect();
+    assert_eq!(filtered[expected_first_table.len()..], later_tables[..]);
+  }
+
+  #[test]
+  fn test_filter_task_info_text_keeps_text_without_summary_rows() {
+    assert_eq!(filter_task_info_text("Loading task details ..."), vec!["Loading task details ..."]);
+    assert_eq!(filter_task_info_text("\nName Value\nIDs   1\n"), vec!["", "Name Value", "IDs   1"]);
+  }
+
+  #[test]
+  fn test_wrap_text_wraps_words_and_splits_long_words() {
+    assert_eq!(wrap_text("one two three", 7), vec!["one two", "three"]);
+    assert_eq!(wrap_text("abcdefghij", 4), vec!["abcd", "efgh", "ij"]);
+    assert_eq!(wrap_text("a\nb", 10), vec!["a", "b"]);
+    assert_eq!(wrap_text("", 10), vec![""]);
+  }
+
+  #[test]
+  fn test_task_details_summary_lines_order_styles_and_separators() {
+    let config = details_test_config(&["color.overdue red", "color.due.today yellow", "color.due blue"]);
+    let mut task = details_test_task(
+      r#"{"uuid":"4f08d42c-7af5-4649-89a3-7475797d3078","id":12,"description":"Write docs","entry":"20261022T172603Z","status":"pending","due":"20261101T120000Z","annotations":[{"entry":"20261022T172620Z","description":"first note"},{"entry":"20261029T215838Z","description":"second note"},{"entry":"20261030T101010Z","description":"third note"}]}"#,
+    );
+    add_tag(&mut task, "OVERDUE".to_string());
+    add_tag(&mut task, "DUE".to_string());
+
+    let lines = task_details_summary_lines(&task, &config, 40);
+    let texts: Vec<String> = lines.iter().map(line_text).collect();
+    let due = datetime::format_local_date_time(task.due().unwrap());
+    let notes: Vec<String> = task
+      .annotations()
+      .unwrap()
+      .iter()
+      .map(|a| format!("{} {}", datetime::format_local_date_time(a.entry()), a.description()))
+      .collect();
+    let separator = "─".repeat(40);
+
+    assert_eq!(
+      texts,
+      vec![
+        "Description   Write docs".to_string(),
+        "ID            12".to_string(),
+        "Status        Pending".to_string(),
+        format!("Due           {due}"),
+        String::new(),
+        "Annotations".to_string(),
+        notes[0].clone(),
+        separator.clone(),
+        notes[1].clone(),
+        separator,
+        notes[2].clone(),
+      ]
+    );
+
+    assert_eq!(lines[0].spans[1].style, config.uda_style_details_description);
+    assert_eq!(lines[2].spans[1].style, config.uda_style_details_status_pending);
+    assert_eq!(lines[3].spans[1].style, Config::get_tcolor("red"));
+    assert_eq!(lines[6].spans[0].style, config.uda_style_details_annotation_date);
+    assert_eq!(lines[7].spans[0].style, config.uda_style_details_annotation_separator);
+  }
+
+  #[test]
+  fn test_task_details_summary_lines_omits_due_and_annotations_when_absent() {
+    let config = details_test_config(&[]);
+    let task = details_test_task(
+      r#"{"uuid":"4f08d42c-7af5-4649-89a3-7475797d3078","id":0,"description":"Done task","entry":"20261022T172603Z","status":"completed"}"#,
+    );
+
+    let texts: Vec<String> = task_details_summary_lines(&task, &config, 80).iter().map(line_text).collect();
+    assert_eq!(texts, vec!["Description   Done task", "ID            -", "Status        Completed"]);
+  }
+
+  #[test]
+  fn test_task_details_due_style_uses_taskwarrior_due_colors() {
+    let config = details_test_config(&["color.overdue red", "color.due.today yellow", "color.due blue"]);
+    let mut task = details_test_task(
+      r#"{"uuid":"4f08d42c-7af5-4649-89a3-7475797d3078","id":1,"description":"x","entry":"20261022T172603Z","status":"pending","due":"20261101T120000Z"}"#,
+    );
+    assert_eq!(task_details_due_style(&task, &config), Style::default());
+    add_tag(&mut task, "DUE".to_string());
+    assert_eq!(task_details_due_style(&task, &config), Config::get_tcolor("blue"));
+    add_tag(&mut task, "DUETODAY".to_string());
+    assert_eq!(task_details_due_style(&task, &config), Config::get_tcolor("yellow"));
+    add_tag(&mut task, "OVERDUE".to_string());
+    assert_eq!(task_details_due_style(&task, &config), Config::get_tcolor("red"));
+  }
+
+  #[test]
+  fn test_task_details_summary_lines_wrap_with_hanging_indent() {
+    let config = details_test_config(&[]);
+    let task = details_test_task(
+      r#"{"uuid":"4f08d42c-7af5-4649-89a3-7475797d3078","id":3,"description":"alpha beta gamma delta epsilon","entry":"20261022T172603Z","status":"pending","annotations":[{"entry":"20261022T172620Z","description":"one two three four"}]}"#,
+    );
+
+    let texts: Vec<String> = task_details_summary_lines(&task, &config, 30).iter().map(line_text).collect();
+    let date = datetime::format_local_date_time(task.annotations().unwrap()[0].entry());
+    assert_eq!(
+      texts,
+      vec![
+        "Description   alpha beta gamma".to_string(),
+        "              delta epsilon".to_string(),
+        "ID            3".to_string(),
+        "Status        Pending".to_string(),
+        String::new(),
+        "Annotations".to_string(),
+        format!("{date} one two"),
+        format!("{}three four", " ".repeat(20)),
+      ]
+    );
+    assert!(texts.iter().all(|text| text.width() <= 30));
   }
 
   #[tokio::test]
